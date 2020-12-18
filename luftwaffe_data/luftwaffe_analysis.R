@@ -3,7 +3,7 @@ library(zoo)
 library(gtools)
 library(ggplot2)
 library(lubridate)
-
+library(reshape)
 setwd('C:/Users/Larry/Documents/Github/eighth_air_force_blog')
 
 claims_east = read.csv('luftwaffe_data/data/claims_east.txt')
@@ -208,8 +208,33 @@ df_1[grep('NJG',df_1[,'unit']),'unit_type'] = "NJG"
 df_1[grep('JG 30',df_1[,'unit']),'unit_type'] = "wilde_sau"
 df_1[grep('ZG',df_1[,'unit']),'unit_type'] = "ZG"
 
+entered_by_month_front = df_1[-which(is.na(df_1[,'status'])),] %>%
+  group_by(full_name) %>% 
+  filter(dates == min(dates)) %>% 
+  group_by(front, yearmon) %>% 
+  summarise(pilot_change = n()) %>% 
+  as.data.frame()
 
-counts_by_group_month_rm_28_w_exit = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-09-30"), by = 'day'), function(x){
+exits_by_month_front = df_1[-which(is.na(df_1[,'status_date'])),] %>%
+  mutate(yearmon = as.yearmon(as.Date(status_date)))%>%
+  group_by(full_name) %>% 
+  filter(dates == max(dates)) %>%
+  group_by(front, yearmon) %>% 
+  summarise(pilot_change = n()) %>% 
+  as.data.frame()
+
+entered_by_month_front[,'change_type']  = 'entry'
+exits_by_month_front[,'change_type'] = 'exit'
+
+entry_exits_by_month_front = rbind(entered_by_month_front, exits_by_month_front)
+entry_exits_by_month_front_plot = entry_exits_by_month_front %>% ggplot(aes(x = yearmon , y = pilot_change, group = change_type, colour = change_type))+
+  geom_line()+
+  facet_grid(front~.)+
+  scale_y_continuous(limits = c(0,75))+
+  theme_bw()
+
+
+pilot_counts_by_day_front = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-09-30"), by = 'day'), function(x){
   print(x)
   df_1[,'date_diff'] = x-df_1[,'max_date']
   
@@ -225,7 +250,8 @@ counts_by_group_month_rm_28_w_exit = lapply(seq.Date(as.Date("1943-08-01"),as.Da
     #subset(rank > 4) %>% 
     filter(rank == max(rank))%>%
     subset( status_date_diff <= 0)  %>%
-    #subset(last_kill_date_diff <= 28*2) %>% 
+    #can play with this to try and time individuals 'lapsing' 
+    #subset(last_kill_date_diff <= 28*3) %>% 
     as.data.frame()
   
   
@@ -252,48 +278,25 @@ counts_by_group_month_rm_28_w_exit = lapply(seq.Date(as.Date("1943-08-01"),as.Da
               sum_claims = sum(claims_day))  %>% 
     as.data.frame()
   sum_counts[,'date'] = x
+  
   return(sum_counts)
 })
 
-unique(df[,c('max_date','min_date', 'full_name')])[which(duplicated(unique(df[,c('max_date','min_date', 'full_name')])[,3])),]
-counts_by_group_month_rm_28 = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-09-30"), by = 'day'), function(x){
-  print(x)
-  df_1[,'date_diff'] = x-df_1[,'max_date']
-  df_1 = df_1 %>%mutate(last_kill_date_diff = x - dates)
-  get_counts_day = subset(df_1, dates<=x)%>%
-    mutate(last_kill_date_diff = x - dates) %>% 
-    group_by(full_name)%>% filter(dates == max(dates))%>%
-    #subset(rank > 4) %>% 
-    filter(rank == max(rank))%>%
-    #subset( date_diff < 7)  %>%
-    subset(last_kill_date_diff < 28) %>% 
-    as.data.frame()
 
-  
-  to_keep_unit = subset(groups_enter_leave_reich_defense, enter_reich_defense < x & exit_reich_defense > x & gruppe == 'NA') %>% select(unit)
-  to_keep_unit_w_gruppe = subset(groups_enter_leave_reich_defense, enter_reich_defense < x & exit_reich_defense > x & gruppe != 'NA') %>% select(unit, gruppe)
+pilot_counts_by_day_front = do.call(rbind,pilot_counts_by_day_front)
+write.csv(pilot_counts_by_day_front, file = 'luftwaffe_data/data/num_pilots_by_day_reich_defense.csv', row.names = FALSE)
 
-  get_counts_day_units = merge(get_counts_day, to_keep_unit, by = 'unit')
-  get_counts_day_units_gruppe = merge(get_counts_day, to_keep_unit_w_gruppe, by = c('unit', 'gruppe'))
-  get_counts_day_1 = rbind(get_counts_day_units, get_counts_day_units_gruppe)
-  get_counts_day_1[,'rd'] = 1
-  
-  get_counts_day_not_in_rd = get_counts_day %>% filter(!full_name %in% get_counts_day_1[,'full_name']) %>% mutate(rd = 0 )
-  
-  get_counts_day_1 = rbind(get_counts_day_1, get_counts_day_not_in_rd)
-  get_counts_day_1 = get_counts_day_1 %>% 
-    mutate(entry = (rank==1)*(dates == x)*1, exit = (max_date == x)*1) %>% 
-    mutate(ace_entry = (rank==5)*(dates == x)*1, ace_exit =  (rank==5)*(max_date == x)*1 )
-  
-  sum_counts = get_counts_day_1%>% group_by(unit,rd,unit_type) %>% 
-    summarise(total_kills = sum(rank), pilots_w_kills = sum((rank>0)*1), aces = sum((rank>4)*1), gt_20 = sum((rank>19)*1),
-            entries = sum(entry), exits = sum(exit), ace_entries = sum(ace_entry), ace_exits = sum(ace_exit)  )  %>% 
-    as.data.frame()
-  sum_counts[,'date'] = x
-  return(sum_counts)
-})
+aces_by_day_front = pilot_counts_by_day_front %>% group_by(unit_type, date, rd) %>% 
+    summarise(aces = sum(aces)) %>% 
+    as.data.frame() %>%
+    ggplot(aes(x = date, y = aces, colour = rd, group = rd)) +
+  facet_wrap(unit_type~.)+
+  geom_line()
 
-counts_by_day_1 = function(x){
+
+
+
+pilots_by_day_function = function(x){
   print(x)
   df_1[,'date_diff'] = x-df_1[,'max_date']
   
@@ -309,7 +312,7 @@ counts_by_day_1 = function(x){
     #subset(rank > 4) %>% 
     filter(rank == max(rank))%>%
     subset( status_date_diff <= 0)  %>%
-    #subset(last_kill_date_diff <= 28*2) %>% 
+    #subset(last_kill_date_diff <= 28*3) %>% 
     as.data.frame()
   
   
@@ -338,109 +341,28 @@ counts_by_day_1 = function(x){
   
   return(get_counts_day_2[,c(1,4)])
 }
-pilots_2_44 = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-09-30"), by = 'month'), counts_by_day_1)
 
-temp_df = Reduce(function(x, y) merge(x, y, all=TRUE, by = 'full_name'), pilots_2_44)
 
-temp_df_melt = melt(temp_df, id.vars = 'full_name')
-temp_df_melt[,'value'] = as.factor(temp_df_melt[,'value'])
-library(ggalluvial)
-ggplot(temp_df_melt,
-       aes(x = variable, stratum = as.factor(value), alluvium = full_name,
-           fill = as.factor(value), label = as.factor(value))) +
-  scale_fill_brewer(type = "qual", palette = "Set2") +
-  geom_flow(stat = "alluvium", lode.guidance = "frontback",
-            color = "darkgray") +
-  geom_stratum() +
-  theme(legend.position = "bottom") +
-  ggtitle("student curricula across several semesters")
+pilots_by_month = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-09-30"), by = 'month'), pilots_by_day_function)
 
-temp_df_melt_1 = temp_df_melt
-temp_df_melt_1[,'date'] = as.Date(gsub('_rd','',temp_df_melt_1[,'variable']))
-temp_df_melt_1[,'date_sub'] = temp_df_melt_1[,'date'] %m-% months(1)
+merged_pilots_by_month = Reduce(function(x, y) merge(x, y, all=TRUE, by = 'full_name'), pilots_by_month)
 
-temp_df_melt_2 = merge(temp_df_melt_1[,c('full_name','date_sub','value')], temp_df_melt_1[,c('full_name','date','value')], 
+merged_pilots_by_month_melt = melt(merged_pilots_by_month, id.vars = 'full_name')
+merged_pilots_by_month_melt[,'value'] = as.factor(merged_pilots_by_month_melt[,'value'])
+merged_pilots_by_month_melt_sub_month = merged_pilots_by_month_melt
+merged_pilots_by_month_melt_sub_month[,'date'] = as.Date(gsub('_rd','',merged_pilots_by_month_melt_sub_month[,'variable']))
+merged_pilots_by_month_melt_sub_month[,'date_sub'] = merged_pilots_by_month_melt_sub_month[,'date'] %m-% months(1)
+
+merged_pilots_by_month_melt_sub_month = merge(merged_pilots_by_month_melt_sub_month[,c('full_name','date_sub','value')], merged_pilots_by_month_melt_sub_month[,c('full_name','date','value')], 
                        by.x = c('full_name','date_sub'),
-                        by.y = c('full_name','date'))
-temp_df_melt_2_agg = temp_df_melt_2 %>% group_by(date_sub, value.x, value.y) %>% summarise(counts = n()) %>% as.data.frame()
+                       by.y = c('full_name','date'))
+
+
+temp_df_melt_2_agg = merged_pilots_by_month_melt_sub_month %>% group_by(date_sub, value.x, value.y) %>% summarise(counts = n()) %>% as.data.frame()
 temp_df_melt_3_agg = (temp_df_melt_2_agg %>% filter(value.x ==1 | value.y == 1) %>% mutate(groups = as.factor(paste0(value.x, value.y))))
 temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '01'),'counts'] = -temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '01'),'counts']
 temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '21'),'counts'] = -temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '21'),'counts']
 
-ggplot(subset(temp_df_melt_3_agg, groups !='11'),aes(x = date_sub, y = counts, fill = groups))+geom_bar(stat = 'identity')
+change_in_pilots_by_front = ggplot(subset(temp_df_melt_3_agg, groups !='11'),aes(x = date_sub, y = counts, fill = groups))+geom_bar(stat = 'identity')
 
-pilots_5_44 = counts_by_day_1(as.Date('1944-05-01'))%>% mutate(gruppe_5_44 = gruppe, unit_5_44 = unit, rank_5_44=rank, rd_5_44 = rd) %>%
-  select(full_name, status_date, status, gruppe_5_44, unit_5_44, rank_5_44, rd_5_44)
-
-
-pilots_2_5 = merge(pilots_2_44, pilots_5_44, by = c('full_name','status','status_date'), all = TRUE)
-pilots_2_5[is.na(pilots_2_5)] = -1
-pilots_2_5 %>% group_by(rd_2_44, rd_5_44) %>% summarise(counts = n())
-
-requires(ggplot2)
-library(ggalluvial)
-
-ggplot(df_1, aes(x = dates, stratum = gruppe, alluvium = full_name, fill = gruppe)) +
-  scale_fill_brewer(type = "qual", palette = "Set2") +
-  geom_flow(stat = "alluvium", lode.guidance = "rightleft", color = "darkgray") +
-  geom_stratum() +
-  theme(legend.position = "bottom") +
-  ggtitle("Treatment across observation period")
-
-
-library(alluvial)
-
-
-alluvial((pilots_2_5 %>% group_by(rd_2_44, rd_5_44) %>% summarise(counts = n()) %>% as.data.frame())[,1:2],
-         freq=(pilots_2_5 %>% group_by(rd_2_44, rd_5_44) %>% summarise(counts = n()) %>% as.data.frame())$counts,
-         cex = 0.7
-)
-
-alluvial_ts((pilots_2_5 %>% group_by(rd_2_44, rd_5_44) %>% summarise(counts = n()) %>% as.data.frame()),
-            wave = .3, ygap = 5,  plotdir = 'centred', alpha=.9,
-            grid = TRUE, grid.lwd = 5, xmargin = 0.2, lab.cex = .7, xlab = '',
-            ylab = '', border = NA, axis.cex = .8, leg.cex = .7,
-            leg.col='white', 
-            title = "UNHCR-recognised refugees\nTop 10 countries (2003-13)\n")
-
-counts_by_group_month_rm_28_w_exit = do.call(rbind,counts_by_group_month_rm_28_w_exit)
-ggplot(counts_by_group_month_rm_28_w_exit, aes(x = date, y= aces ))+facet_wrap(unit_type~.)+geom_line()
-
-ggplot((subset(counts_by_group_month_rm_28_w_exit , rd == 1) %>% group_by(unit_type, date) %>% summarise(aces = sum(aces)) %>% as.data.frame()),
-       aes(x = date, y= aces, ))+facet_wrap(unit_type~.)+geom_line()
-
-ggplot((subset(counts_by_group_month_rm_28_w_exit ) %>% group_by(unit_type, date, rd) %>% summarise(aces = sum(aces)) %>% as.data.frame()),
-       aes(x = date, y= aces, colour = as.factor(rd)))+facet_wrap(unit_type~.)+geom_line()
-
-counts_by_group_month_rm_28  = do.call(rbind,counts_by_group_month_rm_28)
-ggplot(counts_by_group_month_west_rm_28_days, aes(x = date, y= aces, ))+facet_wrap(unit_type~.)+geom_line()
-ggplot((subset(counts_by_group_month_rm_28 ) %>% group_by(unit_type, date,rd) %>% summarise(aces = sum(aces)) %>% as.data.frame()),
-       aes(x = date, y= aces, ))+facet_wrap(unit_type~.)+geom_line()
-
-
-claims_by_unit = df_1 %>% group_by(unit) %>% summarise(n_claimed_in_unit = n()) %>% as.data.frame()
-claims_by_unit[,'unit'] = factor(claims_by_unit[,'unit'], claims_by_unit[order(claims_by_unit[,'n_claimed_in_unit']),'unit'])
-counts_by_group_month_rm_28 = merge(counts_by_group_month_rm_28,claims_by_unit, by = 'unit', all.x = TRUE)
-counts_by_group_month_rm_28_w_exit = merge(counts_by_group_month_rm_28_w_exit,claims_by_unit, by = 'unit', all.x = TRUE)
-
-ggplot(subset(counts_by_group_month_rm_28, n_claimed_in_unit > 100), aes(x = date, y = aces, colour = as.factor(rd)))+geom_line()+facet_wrap(unit~., scales = 'free')
-
-ggplot(subset(counts_by_group_month_rm_28, n_claimed_in_unit > 100), aes(x = date, y = exits, colour = as.factor(rd)))+geom_line()+facet_wrap(unit~., scales = 'free')
-
-
-changes_in_pilots_by_month = (subset(counts_by_group_month_rm_28_w_exit, n_claimed_in_unit > 100 & rd ==1) %>%#mutate(date = as.yearmon(date)) %>% 
-                                group_by(unit,date) %>% 
-                                summarise(exits=sum(exits), entries = sum(entries), ace_exits = sum(ace_exits), ace_entries = sum(ace_entries)) %>% 
-                                mutate(exits = cumsum(exits), entries = cumsum(entries), ace_exits  =cumsum(ace_exits), ace_entries = cumsum(ace_entries)) %>% as.data.frame())
-library(reshape)
-
-changes_in_pilots_by_month = mutate(changes_in_pilots_by_month, ace_diff = ace_entries-ace_exits)
-
-test_merge = merge(subset(changes_in_pilots_by_month, unit == 'JG 26'), 
-                   subset(counts_by_group_month_rm_28_w_exit, rd == 1 & unit == 'JG 26'), by = c('date')) 
-
-changes_in_pilots_by_month_melt = melt(changes_in_pilots_by_month, id.vars = c('date','unit_type'))
-ggplot(changes_in_pilots_by_month_melt, 
-       aes(x = date, y = value, colour = variable))+
-    geom_line()+facet_grid(unit_type~variable, scales = 'free')
 
