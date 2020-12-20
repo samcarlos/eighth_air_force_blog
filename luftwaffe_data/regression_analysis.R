@@ -21,6 +21,7 @@ library(reshape)
 library(zoo)
 library(ggrepel)
 library(scales)
+library(stargazer)
 
 setwd('C:/Users/Larry/Documents/Github/eighth_air_force_blog')
 
@@ -69,115 +70,78 @@ missions_lat_long[which(missions_lat_long[,'A.C.Type'] %in% c("B-17", "B-24")), 
 missions_lat_long[,'aborted_recalled'] = missions_lat_long[,'Recalled']+missions_lat_long[,'RTB']+missions_lat_long[,'Aborted']
 missions_lat_long[,'scrubed_mission'] = (missions_lat_long[,'aborted_recalled']/missions_lat_long[,'Dispatched']>.9)
 
-avg_distance_heavies_mission = subset(missions_lat_long, heavies ==1 & Dispatched > 0) %>% select(Mission.Number, distance) %>%
-  group_by(Mission.Number) %>%  mutate(mean_distance_heavies = mean(distance)) %>% as.data.frame()
-
-missions_lat_long_agg_mission = missions_lat_long %>% group_by(Date , Mission.Number ,  A.C.Type, scrubed_mission, no_escorts)%>%
-  summarise(Dispatched = sum(Dispatched),
-            Escorts = sum(Escorts),
-            Recalled = sum(Recalled), 
-            RTB = sum(RTB),
-            Lost.en.route = sum(Lost.en.route),
-            Bombed = sum(Bombed), 
-            Total.Lost = sum(Total.Lost),
-            Cat.E = sum(Cat.E),
-            Damaged = sum(Damaged),
-            KIA = sum(KIA),
-            WIA = sum(WIA),
-            MIA = sum(MIA),
-            min_distance = min(distance),
-            max_distance = max(distance),
-            norway_denmark = sum(norway_denmark),
-            target_type = paste0(unique(target_type_2),collapse = ','),
-            Notes = paste0(Notes, collapse = ",")) %>% as.data.frame()
-
-missions_lat_long_agg_mission = merge(missions_lat_long_agg_mission, unique(avg_distance_heavies_mission[,-2]), by = 'Mission.Number', all.x = TRUE)
-missions_lat_long_agg_wide = reshape(subset(missions_lat_long_agg_mission[,c('Date','Mission.Number','Dispatched','Total.Lost','A.C.Type', 
-                                                                             'mean_distance_heavies','no_escorts','scrubed_mission', 'min_distance','max_distance'),] , 
-                                            Dispatched> 5 & scrubed_mission == 0 & Mission.Number !=0),
-                                     idvar = c("Date", 'Mission.Number', 'mean_distance_heavies','no_escorts','scrubed_mission','min_distance','max_distance'),
-                                     timevar = c("A.C.Type"),
-                                     direction = "wide")
-
-
-
-colnames(missions_lat_long_agg_wide) = gsub('\\.','',colnames(missions_lat_long_agg_wide))
-colnames(missions_lat_long_agg_wide) = gsub('\\-','',colnames(missions_lat_long_agg_wide))
-
-missions_lat_long_agg_wide[is.na(missions_lat_long_agg_wide)] = 0
-
-missions_lat_long_agg_wide = mutate(missions_lat_long_agg_wide, heavies_dispatched = DispatchedB17+ DispatchedB24, 
-                                    heavies_lost = TotalLostB24+TotalLostB17,
-                                    has_p51 = (DispatchedP51>0)*1,
-                                    has_p47 = (DispatchedP47>0)*1,
-                                    has_p38 = (DispatchedP38>0)*1) %>%
-  mutate(heavies_lost_ratio =heavies_lost/heavies_dispatched )%>% 
-  mutate(heavies_los_ratio_odds = heavies_lost_ratio/(1-heavies_lost_ratio))
-
-missions_lat_long_agg_wide[,'Date'] = as.Date(missions_lat_long_agg_wide[,'Date'])
-
 pilot_counts_by_day_front = read.csv('luftwaffe_data/data/num_pilots_by_day_reich_defense.csv')
-total_aces_by_day_rd = pilot_counts_by_day_front %>% 
-  subset(unit_type != "NJG" & rd == 1) %>%
-  group_by( date, rd) %>% 
-  summarise(aces = sum(aces)) %>% 
+##
+missions_lat_long_agg_wide_loc = reshape(subset(missions_lat_long_agg[,c('Date','Mission.Number','Dispatched','Total.Lost','A.C.Type', 'distance',
+                                                                         'lon','lat','target_type_2', 'target_country')] , Dispatched> 5),
+                                         idvar = c("Date", 'Mission.Number', 'distance', 'lon','lat','target_type_2','target_country'),
+                                         timevar = c("A.C.Type"),
+                                         direction = "wide")
+
+missions_lat_long_agg_heavies = filter(missions_lat_long_agg, A.C.Type %in% c("B-17", "B-24")) %>% 
+  subset(Mission.Number !=0) %>%
+  group_by(Mission.Number, lon,lat, target_country,distance, Date)%>%
+  summarise(Dispatched = sum(Dispatched), Recalled = sum(Recalled), total_lost = sum(Total.Lost)) %>% 
   as.data.frame()
+
+
+heavies_per_mission = filter(missions_lat_long_agg, A.C.Type %in% c("B-17", "B-24")) %>% 
+  subset(Mission.Number !=0) %>%
+  group_by(Mission.Number)%>%
+  summarise(total_heavies_dispatched_mission = sum(Dispatched)) %>% 
+  as.data.frame()
+
+missions_fighters = filter(missions_lat_long_agg, A.C.Type %in% c("P-51", "P-47","P-38")) %>% 
+  subset(Mission.Number !=0) %>%
+  group_by(Mission.Number, A.C.Type) %>% 
+  summarise(Dispatched = sum(Dispatched)) %>% 
+  as.data.frame() %>%
+  reshape(idvar = 'Mission.Number',timevar ='A.C.Type',direction = 'wide')
+missions_fighters[is.na(missions_fighters)] = 0
+
+exits_by_day = pilot_counts_by_day_front %>% 
+  group_by(rd, date) %>% 
+  subset(unit_type != "NJG" & rd == 1) %>%
+  summarise( ace_exits = sum(ace_exits), exits = sum(exits)) %>% 
+  as.data.frame() %>% subset(rd == 1)
+
+total_aces_by_day_rd = pilot_counts_by_day_front %>%
+  subset(unit_type != "NJG" & rd == 1) %>%
+  group_by( date, rd) %>%
+  summarise(aces = sum(aces), pilots = sum(pilots_w_kills), total_kills = sum(total_kills)) %>%
+  as.data.frame()
+
+missions_lat_long_agg_heavies = merge(missions_lat_long_agg_heavies, heavies_per_mission, on = 'Mission.Number')
+missions_lat_long_agg_heavies = merge(missions_lat_long_agg_heavies, missions_fighters, on = 'Mission.Number')
+
+
+
+colnames(missions_lat_long_agg_heavies) = gsub('\\.','',colnames(missions_lat_long_agg_heavies))
+colnames(missions_lat_long_agg_heavies) = gsub('\\-','',colnames(missions_lat_long_agg_heavies))
+missions_lat_long_agg_heavies[,'Date'] = as.Date(missions_lat_long_agg_heavies[,'Date'])
+missions_lat_long_agg_heavies = mutate(missions_lat_long_agg_heavies, ratio_dispatched = Dispatched / total_heavies_dispatched_mission) %>%
+  mutate(weighted_p38 = ratio_dispatched* DispatchedP38,
+         weighted_p51 = ratio_dispatched* DispatchedP51, 
+         weighted_p47 = ratio_dispatched* DispatchedP47)
+
 total_aces_by_day_rd[,'date'] = as.Date(total_aces_by_day_rd[,'date'])
-#ggplot(aes(x = as.Date(date), y = aces)) + geom_line()
+exits_by_day[,'date'] = as.Date(exits_by_day[,'date'])
 
-missions_lat_long_agg_wide_merged_luftwaffe = merge(missions_lat_long_agg_wide, total_aces_by_day_rd,
-                                                    by.x = 'Date',by.y = 'date')
+missions_lat_long_agg_heavies = merge(missions_lat_long_agg_heavies, total_aces_by_day_rd,  by.x = 'Date',by.y = 'date')
 
-pairs(missions_lat_long_agg_wide[,c('heavies_los_ratio_odds','heavies_dispatched', 'heavies_lost','heavies_lost_ratio', 'DispatchedP51', 'DispatchedP47', 'DispatchedP38')])
-missions_lat_long_agg_wide[,'mean_distance_heavies_500'] = (missions_lat_long_agg_wide[,'mean_distance_heavies'] > 500)*1
-library(mgcv)
+missions_lat_long_agg_heavies[is.na(missions_lat_long_agg_heavies)] = 0
 
-gam1 = gam(heavies_lost ~ s(as.numeric(as.Date(Date))) +s(mean_distance_heavies) + s(heavies_dispatched)+ min_distance+max_distance+
-             (DispatchedP51*(mean_distance_heavies))+(DispatchedP47*(mean_distance_heavies))+(DispatchedP38*(mean_distance_heavies))+ 
-             aces, data = subset(missions_lat_long_agg_wide, (DispatchedB17+DispatchedB24) >0 & heavies_lost_ratio<1 & mean_distance_heavies <1000 & DispatchedP51< 400))
-summary(gam1)
+missions_lat_long_agg_heavies[,'no_p51'] = (missions_lat_long_agg_heavies[,'weighted_p51']==0)*1
+missions_lat_long_agg_heavies[,'no_p38'] = (missions_lat_long_agg_heavies[,'weighted_p38']==0)*1
+missions_lat_long_agg_heavies[,'no_p47'] = (missions_lat_long_agg_heavies[,'weighted_p47']==0)*1
 
 
-reg_luft = lm(heavies_los_ratio  ~  (log(heavies_dispatched))+((as.numeric(as.Date(Date)))) +((mean_distance_heavies))*
-                (log(1+DispatchedP51/heavies_dispatched) + log(1+DispatchedP47/heavies_dispatched) +
-                log(1+DispatchedP38/heavies_dispatched))*
-                aces,
-              data = subset(missions_lat_long_agg_wide_merged_luftwaffe, (DispatchedB17+DispatchedB24) >0 & 
-                            heavies_lost_ratio<1   & DispatchedP51< 400 & Date > as.Date('1943-06-01') & Date < as.Date('1944-06-01')))
-
-reg_luft = gam(log(heavies_lost+1)  ~  s(log(heavies_dispatched))+s((as.numeric(as.Date(Date)))) +((mean_distance_heavies)) +
-                (log(1+DispatchedP51)) + log(1+DispatchedP47) +
-                log(1+DispatchedP38)+(has_p51)+(has_p38)+(has_p47)+
-                s(aces),
-              data = subset(missions_lat_long_agg_wide_merged_luftwaffe, (DispatchedB17+DispatchedB24) >0 & 
-                              heavies_lost_ratio<1   & DispatchedP51< 400& DispatchedP38< 400 & Date > as.Date('1943-06-01')& Date < as.Date('1944-06-01') ))
-summary(reg_luft)
-
-reg_luft = randomForest(log(heavies_lost+1)  ~  (log(heavies_dispatched))+((as.numeric(as.Date(Date)))) +((mean_distance_heavies)) +min_distance+max_distance+
-                log(1+DispatchedP51) + log(1+DispatchedP47) +
-                log(1+DispatchedP38)+
-                log(aces),
-              data = subset(missions_lat_long_agg_wide_merged_luftwaffe, (DispatchedB17+DispatchedB24) >20 & 
-                              heavies_lost_ratio<1   & DispatchedP51< 400& DispatchedP38< 400 & Date > as.Date('1943-06-01')& Date < as.Date('1944-06-01')))
-
-head(subset(missions_lat_long_agg_wide_merged_luftwaffe,
-            (DispatchedB17+DispatchedB24) >20 & heavies_lost_ratio<1   & DispatchedP51< 400 & Date > as.Date('1943-06-01') )[order(resids),
-                                    c('mean_distance_heavies','DispatchedP47','DispatchedP51', 'DispatchedP38','DispatchedB17','DispatchedB24', 'heavies_lost', 'Date')])
-par(mfrow = c(2,2))
-plot(reg_luft)
-summary(reg_luft)
+reg_1 = gam(log(total_lost+1)~ log(Dispatched + 1)  +
+              ratio_dispatched+(log(weighted_p38+1)+log(weighted_p51+1) + log(weighted_p47+1))+(distance)+(as.numeric(Date))+ no_p51+
+              no_p38+no_p47+
+              total_kills, data = subset(missions_lat_long_agg_heavies,Dispatched > 0 & Date < '1944-06-05' & DispatchedP38<400 ))
 
 
+summary(reg_1)
 
-missions_lat_long_agg_wide[,'numeric_date'] = as.numeric(as.Date(missions_lat_long_agg_wide[,'Date']))
-missions_lat_long_agg_wide_merged_luftwaffe[,'numeric_date'] = as.numeric(as.Date(missions_lat_long_agg_wide_merged_luftwaffe[,'Date']))
-library(randomForest)
-rf = randomForest(heavies_lost_ratio~ Dispatched+distance + Date + 
-                    p47 , data = subset(missions_lat_long_agg_wide_merged_luftwaffe,Dispatched > 0 ),
-                  maxnodes  = 10)
-summary(reg_luft)
-
-resids = rf$y - rf$predicted
-rf_2 = randomForest(resids~ heavies_dispatched+numeric_date+
-                      mean_distance_heavies+(DispatchedP51)+(DispatchedP47)+(DispatchedP38)+aces,
-                  data =subset(missions_lat_long_agg_wide_merged_luftwaffe, heavies_lost_ratio<1 & mean_distance_heavies <1000 ), maxnodes = 4)
+reg_output = stargazer(reg_1, out = 'plots/model_regression.html')

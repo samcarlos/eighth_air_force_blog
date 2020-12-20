@@ -63,6 +63,13 @@ lw_aces[grep('suicide',lw_aces[,'Remarks']),'status'] = 'suicide'
 
 
 lw_aces[,'full_name'] = tolower(iconv(lw_aces[,'full_name'],to="ASCII//TRANSLIT"))
+
+test_2 = lapply(strsplit(lw_aces[,'Jagdgeschwader'], ','), function(x) (x[length(x)]))
+test_2 = lapply(test_2, function(x) unlist(x[1]))
+test_2[sapply(test_2, is.null)] = NA
+
+lw_aces[,'last_jg'] = unlist(test_2)
+
 lw_aces_1 = lw_aces[,c('full_name','date','status')]
 colnames(lw_aces_1) = c('full_name','status_date','status')
 
@@ -223,15 +230,29 @@ exits_by_month_front = df_1[-which(is.na(df_1[,'status_date'])),] %>%
   summarise(pilot_change = n()) %>% 
   as.data.frame()
 
-entered_by_month_front[,'change_type']  = 'entry'
-exits_by_month_front[,'change_type'] = 'exit'
+entered_by_month_front[,'change_type']  = 'Entries'
+exits_by_month_front[,'change_type'] = 'Exits'
+
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
 
 entry_exits_by_month_front = rbind(entered_by_month_front, exits_by_month_front)
+entry_exits_by_month_front = mutate(entry_exits_by_month_front, front = ifelse(front == 'east','East',front))
+entry_exits_by_month_front = mutate(entry_exits_by_month_front, front = ifelse(front == 'west','West',front))
+
 entry_exits_by_month_front_plot = entry_exits_by_month_front %>% ggplot(aes(x = yearmon , y = pilot_change, group = change_type, colour = change_type))+
   geom_line()+
   facet_grid(front~.)+
   scale_y_continuous(limits = c(0,75))+
-  theme_bw()
+  theme_bw()+
+  ggtitle("Entries and Exits by Front Time Series")+
+  xlab("Date")+
+  ylab('Number of Pilots')+
+  theme_bw()+ theme(legend.position = "bottom",legend.title = element_blank())+
+  theme(text = element_text(size=20))+
+  scale_colour_manual(values=cbbPalette)
+
+ggsave(filename = 'plots/entry_exits_by_month_front_plot.png', plot = entry_exits_by_month_front_plot, width = 9, height = 5, dpi =300)
 
 
 pilot_counts_by_day_front = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-09-30"), by = 'day'), function(x){
@@ -286,14 +307,57 @@ pilot_counts_by_day_front = lapply(seq.Date(as.Date("1943-08-01"),as.Date("1944-
 pilot_counts_by_day_front = do.call(rbind,pilot_counts_by_day_front)
 write.csv(pilot_counts_by_day_front, file = 'luftwaffe_data/data/num_pilots_by_day_reich_defense.csv', row.names = FALSE)
 
-aces_by_day_front = pilot_counts_by_day_front %>% group_by(unit_type, date, rd) %>% 
+pilot_counts_by_day_front = pilot_counts_by_day_front %>% mutate(Reich_Defense = ifelse(rd == 1, 'Reich_Defense','Other_Fronts'))
+
+aces_by_day_front = pilot_counts_by_day_front %>% group_by(unit_type, date, Reich_Defense) %>% 
     summarise(aces = sum(aces)) %>% 
     as.data.frame() %>%
-    ggplot(aes(x = date, y = aces, colour = rd, group = rd)) +
-  facet_wrap(unit_type~.)+
-  geom_line()
+    ggplot(aes(x = date, y = aces, colour = Reich_Defense, group = Reich_Defense)) +
+  facet_wrap(unit_type~., scales = 'free')+
+  geom_line()+
+  theme_bw()+
+  ggtitle("Aces TS by Fighter Group Type and Reich Defense")+
+  xlab("Date")+
+  ylab('Number of Pilots')+
+  theme_bw()+ theme(legend.position = "bottom")+
+  theme(text = element_text(size=20))+
+  scale_fill_manual(values=cbbPalette)
 
 
+pilots_w_kills_by_day_front_fighter_type = pilot_counts_by_day_front %>% group_by(unit_type, date, Reich_Defense) %>% 
+  summarise(pilots_w_kills = sum(pilots_w_kills)) %>% 
+  as.data.frame() %>%
+  ggplot(aes(x = date, y = pilots_w_kills, colour = Reich_Defense, group = Reich_Defense)) +
+  facet_wrap(unit_type~., scales = 'free')+
+  geom_line()+
+  theme_bw()+
+  ggtitle("Pilots TS by Fighter Group Type and Reich Defense")+
+  xlab("Date")+
+  ylab('Number of Pilots')+
+  theme_bw()+ theme(legend.position = "bottom")+
+  theme(text = element_text(size=20))+
+  scale_colour_manual(values=cbbPalette)
+
+ggsave(filename = 'plots/pilots_w_kills_by_day_front_fighter_type.png', plot = pilots_w_kills_by_day_front_fighter_type, width = 15, height = 5, dpi =300)
+
+
+
+
+pilots_w_kills_by_day_front = pilot_counts_by_day_front %>% group_by(date, Reich_Defense) %>% 
+  summarise(pilots_w_kills = sum(pilots_w_kills)) %>% 
+  as.data.frame() %>%
+  ggplot(aes(x = date, y = pilots_w_kills, colour = Reich_Defense, group = Reich_Defense)) +
+  #facet_wrap(unit_type~., scales = 'free')+
+  geom_line()+
+  theme_bw()+
+  ggtitle("Number of Pilots by Reich Defense and Date")+
+  xlab("Date")+
+  ylab('Number of Pilots')+
+  theme_bw()+ theme(legend.position = "bottom")+
+  theme(text = element_text(size=20))+
+  scale_colour_manual(values=cbbPalette)
+
+ggsave(filename = 'plots/pilots_w_kills_by_day_front.png', plot = pilots_w_kills_by_day_front, width = 9, height = 5, dpi =300)
 
 
 pilots_by_day_function = function(x){
@@ -362,7 +426,100 @@ temp_df_melt_2_agg = merged_pilots_by_month_melt_sub_month %>% group_by(date_sub
 temp_df_melt_3_agg = (temp_df_melt_2_agg %>% filter(value.x ==1 | value.y == 1) %>% mutate(groups = as.factor(paste0(value.x, value.y))))
 temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '01'),'counts'] = -temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '01'),'counts']
 temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '21'),'counts'] = -temp_df_melt_3_agg[which(temp_df_melt_3_agg[,'groups'] == '21'),'counts']
+temp_df_melt_3_agg[,'groups'] = as.character(temp_df_melt_3_agg[,'groups'])
+temp_df_melt_3_agg = mutate(temp_df_melt_3_agg, groups = ifelse(groups == '01','exits_to_other_front',groups))
+temp_df_melt_3_agg = mutate(temp_df_melt_3_agg, groups = ifelse(groups == '21','exits',groups))
+temp_df_melt_3_agg = mutate(temp_df_melt_3_agg, groups = ifelse(groups == '1-1','entries_from_new',groups))
+temp_df_melt_3_agg = mutate(temp_df_melt_3_agg, groups = ifelse(groups == '10','entries_from_other_front',groups))
 
-change_in_pilots_by_front = ggplot(subset(temp_df_melt_3_agg, groups !='11'),aes(x = date_sub, y = counts, fill = groups))+geom_bar(stat = 'identity')
+temp_df_melt_3_agg = mutate(temp_df_melt_3_agg, ifelse(groups == '10','Exit_to_other_front',groups))
+total_changes_by_month = temp_df_melt_3_agg %>% subset(groups !='11') %>%
+  group_by(date_sub) %>%
+  summarise(counts = sum(counts)) %>% 
+  as.data.frame()
+temp_df_melt_3_agg = merge(temp_df_melt_3_agg, total_changes_by_month, by = 'date_sub')
+
+change_in_pilots_by_front = ggplot(subset(temp_df_melt_3_agg, groups !='11'),aes(x = date_sub, y = counts.x, fill = groups))+
+  geom_bar(stat = 'identity')+
+  ggtitle("Reich Defense Entries and Exits by Month")+
+  xlab("Date")+
+  ylab('Number of Pilots')+
+  theme_bw()+ theme(legend.position = "bottom",legend.title = element_blank())+
+  theme(text = element_text(size=20))+
+  scale_fill_manual(values=cbbPalette)+
+  geom_line(aes(y = counts.y))+
+  guides(fill=guide_legend(nrow=2,byrow=TRUE))
 
 
+ggsave(filename = 'plots/change_in_pilots_by_front.png', plot = change_in_pilots_by_front, width = 9, height = 5, dpi =300)
+
+
+## data from to command they sky
+destroyed_data_from_tcts = read.csv('luftwaffe_data/data/ww2_luftwaffe_losses_to_command_the_sky.csv')
+destroyed_data_from_tcts[,'Date'] = as.Date(destroyed_data_from_tcts[,'Date'])
+destroyed_data_from_tcts[,'yearmon'] = as.yearmon(destroyed_data_from_tcts[,'Date'])
+
+planes_destroyed_by_month_tcts = destroyed_data_from_tcts %>% group_by(yearmon) %>%
+  summarise(luftwaffe_planes_destroyed = sum(s3)) %>% 
+  as.data.frame() 
+planes_destroyed_by_month_tcts[,'data_type'] = 'planes_shot_down_TCTS'
+
+colnames(planes_destroyed_by_month_tcts)[2] = 'wastage'
+
+planes_destroyed_by_month_tcts %>%
+  ggplot(aes(x = yearmon ,y = luftwaffe_planes_destroyed))+
+  geom_line() + theme_bw() + 
+  ggtitle("Number of Luftwaffe Planes Destroyed by Month")+
+  xlab("Date")+
+  ylab('Number of Planes')+
+  theme_bw()+ 
+  theme(text = element_text(size=20),
+        axis.text.x = element_text(angle = 315))
+  
+ggsave(filename = 'plots/planes_destroyed_by_month_tcts.png', plot = planes_destroyed_by_month_tcts, width = 9, height = 5, dpi =300)
+
+
+#confirm there's some daily correlation between pilot exits and number of planes shot down. there is r^2 of .25
+pilot_counts_by_day_front = read.csv('luftwaffe_data/data/num_pilots_by_day_reich_defense.csv')
+pilot_counts_by_day_front[,'date'] = as.Date(pilot_counts_by_day_front[,'date'])
+pilot_exits_by_day = subset(pilot_counts_by_day_front, rd == 1) %>% group_by(date) %>% summarise(pilot_exits = sum(exits)) %>% as.data.frame()
+pilot_exits_by_yearmon = subset(pilot_counts_by_day_front, rd == 1) %>%
+  mutate(yearmon = as.yearmon(as.Date(date))) %>% 
+  group_by(yearmon) %>% summarise(pilot_exits = sum(exits)) %>% as.data.frame()
+pilot_exits_by_yearmon[,'data_type'] = 'pilot_exits_tony_woods'
+colnames(pilot_exits_by_yearmon)[2] = 'wastage'
+
+pilot_exits_and_planes_shot_down = rbind(planes_destroyed_by_month_tcts, 
+                                         pilot_exits_by_yearmon )
+wastage_by_month_different_sources = pilot_exits_and_planes_shot_down %>% 
+  subset( as.Date(yearmon) < as.Date('1944-07-01')) %>% 
+  ggplot(aes(x = as.Date(yearmon) ,y = wastage))+
+  geom_line() + theme_bw() + 
+  ggtitle("Luftwaffe 'Wastage' by Month for Different Data Sources")+
+  xlab("Date")+
+  ylab('Number of Luftwaffe Losses')+
+  theme_bw()+ facet_grid(data_type~., scales = 'free_y')+
+  theme(text = element_text(size=20),
+        axis.text.x = element_text(angle = 315))+
+  scale_x_date(date_labels="%b %y",date_breaks  ="1 month")
+
+
+ggsave(filename = 'plots/wastage_by_month_different_sources.png', plot = wastage_by_month_different_sources, width = 9, height = 7, dpi =300)
+
+comparison_of_data = merge(pilot_exits_by_day, 
+      destroyed_data_from_tcts,
+      by.x = 'date', by.y = 'Date')
+
+comparison_of_data %>% 
+  ggplot(aes( x = pilot_exits, y= s3)) + geom_point()+
+  ggtitle("Number of Luftwaffe Planes vs Pilot Exits")+
+  xlab("Pilots Exited using Tony Woods Data")+
+  ylab('Planes Shut Down from TCTS Book')+
+  theme_bw()+ 
+  theme(text = element_text(size=20))
+
+reg = lm(pilot_exits ~ s3, data =  merge((pilot_exits_by_day), 
+destroyed_data_from_tcts, by.x = 'date', by.y = 'Date'))
+  summary(reg)
+
+  

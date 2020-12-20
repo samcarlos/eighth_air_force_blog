@@ -243,4 +243,8 @@ big_plot_target_type = (subset(missions_lat_long_agg_heavies, Dispatched>20 & di
   geom_text_repel(size = 3)+
   scale_colour_manual(values=cbbPalette)
 
-ggsave(filename = 'plots/heavies_dispatched_time_distance_target_type.png', plot = big_plot_target_type, width = 20, height = 10, dpi =300)
+total_aces_by_day_rd = pilot_counts_by_day_front %>%
+subset(unit_type != "NJG" & rd == 1) %>%
+group_by( date, rd) %>%
+summarise(aces = sum(aces)) %>%
+as.data.frame()
