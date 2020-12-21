@@ -1,5 +1,5 @@
 # eighth_air_force_blog
-Code for  "Did P51 Destory Luftwaffe?" Post
+Code for  "Did P51 Destory Luftwaffe?" Post: https://scweiss.blogspot.com/2020/12/did-p-51-mustang-defeat-luftwaffe.html
 
 I have two folders each with a similar layout: both have a dataset folder and a code part. These produce charts that get placed in the images folder. 
 
